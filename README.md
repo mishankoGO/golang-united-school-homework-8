@@ -1,6 +1,6 @@
 # golang-united-school-homework-8
 
-In the task you have to write console application for managing users list. It should accept there types of operation:
+In the task you have to write console application for managing users list. It should accept these types of operation:
 `add
 list
 findById
