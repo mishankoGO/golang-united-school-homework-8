@@ -32,16 +32,18 @@ type User struct {
 	Age   int    `json:"age"`
 }
 
-type Arguments struct {
-	id        string
-	operation string
-	item      string
-	itemUsr   User
-	fileName  string
-}
+type Arguments map[string]string
 
-func (a Arguments) ItemParser() User {
-	item := a.item
+//{
+//	id        string
+//	operation string
+//	item      string
+//	itemUsr   User
+//	fileName  string
+//}
+
+func ItemParser(a Arguments) User {
+	item := a["item"]
 	u := User{}
 
 	item = strings.Trim(item, "[{}]")
@@ -78,10 +80,10 @@ func parseArgs() Arguments {
 	fileName := flag.String("fileName", "", "name of the file with users list")
 	flag.Parse()
 
-	var args Arguments
+	var args = make(Arguments)
 
-	args.operation = *op
-	args.id = *Id
+	args["operation"] = *op
+	args["id"] = *Id
 	if len(*item) != 0 {
 		s := strings.Trim(*item, "{}")
 		item := strings.Split(s, ",")
@@ -91,12 +93,12 @@ func parseArgs() Arguments {
 		if err != nil {
 			fmt.Println("error converting age to int")
 		}
-		args.item = fmt.Sprintf("[{\"id\" :\"%s\",\"email\" :\"%s\",\"age\" :%d}]", id, email, age)
+		args["item"] = fmt.Sprintf("[{\"id\" :\"%s\",\"email\" :\"%s\",\"age\" :%d}]", id, email, age)
 		//args.itemUsr = args.ItemParser()
 
 	}
 
-	args.fileName = *fileName
+	args["fileName"] = *fileName
 
 	return args
 }
@@ -171,10 +173,10 @@ func FindById(id string, fileName string, writer io.Writer) {
 	writer.Write([]byte(""))
 }
 
-func Perform(args Arguments, writer io.Writer) (err error) {
+func Perform(args map[string]string, writer io.Writer) (err error) {
 
-	op := args.operation
-	fileName := args.fileName
+	op := args["operation"]
+	fileName := args["fileName"]
 
 	if op == "" {
 		err = fmt.Errorf("%w", OperationMissing)
@@ -187,28 +189,26 @@ func Perform(args Arguments, writer io.Writer) (err error) {
 
 	switch op {
 	case "add":
-		if len(args.item) != 0 {
-			args.itemUsr = args.ItemParser()
-		}
-		item := args.itemUsr
-		Add(item, fileName, writer)
-		if item.Age == 0 { // think about nil User
+		if len(args["item"]) != 0 {
+			itemUsr := ItemParser(args)
+			Add(itemUsr, fileName, writer)
+		} else {
 			err = fmt.Errorf("%w", ItemMissing)
+			return err
 		}
-		return err
 
 	case "list":
 		List(fileName, writer)
 
 	case "remove":
-		id := args.id
+		id := args["id"]
 		if id == "" {
 			err = fmt.Errorf("%w", IdMissing)
 		}
 		Remove(id, fileName, writer)
 
 	case "findById":
-		id := args.id
+		id := args["id"]
 		if id == "" {
 			err = fmt.Errorf("%w", IdMissing)
 		}
