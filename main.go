@@ -12,34 +12,6 @@ import (
 	"strings"
 )
 
-type Users struct {
-	Users []User `json:"users"`
-}
-
-func (u *Users) Append(usr User) {
-	u.Users = append(u.Users, usr)
-}
-
-func (u Users) Print(writer io.Writer) {
-	var res strings.Builder
-	res.WriteString("[")
-	for i := 0; i < len(u.Users); i++ {
-		res.WriteString("{")
-		res.WriteString(fmt.Sprintf(`"id": "%s", "email": "%s", "age": %d`,
-			u.Users[i].Id,
-			u.Users[i].Email,
-			u.Users[i].Age,
-		))
-		res.WriteString("}")
-		if i < len(u.Users)-1 {
-			res.WriteString(",")
-
-		}
-	}
-	res.WriteString("]\n")
-	writer.Write([]byte(res.String()))
-}
-
 var OperationMissing = errors.New("-operation flag has to be specified")
 var FileNameMissing = errors.New("-fileName flag has to be specified")
 var OperationNotAllowed = func(s string) error {
@@ -47,20 +19,52 @@ var OperationNotAllowed = func(s string) error {
 }
 var ItemMissing = errors.New("-item flag has to be specified")
 var IdMissing = errors.New("-id flag has to be specified")
-var IdExists = errors.New("Item with id 1 already exists")
+var IdExists = func(s string) string {
+	return fmt.Sprintf("Item with id %s already exists", s)
+}
+var IdNotFound = func(s string) string {
+	return fmt.Sprintf("Item with id %s not found", s)
+}
 
 type User struct {
-	Id    string
-	Email string
-	Age   int
+	Id    string `json:"id"`
+	Email string `json:"email"`
+	Age   int    `json:"age"`
 }
 
 type Arguments struct {
-	Id        string
-	Operation string
-	Item      string
-	ItemUsr   User
-	FileName  string
+	id        string
+	operation string
+	item      string
+	itemUsr   User
+	fileName  string
+}
+
+func (a Arguments) ItemParser() User {
+	item := a.item
+	u := User{}
+
+	item = strings.Trim(item, "[{}]")
+	item = strings.Replace(item, " ", "", -1)
+	itemLst := strings.Split(item, ",")
+
+	for _, elem := range itemLst {
+		kVal := strings.Split(elem, ":")
+		kVal[0] = strings.Trim(kVal[0], "\"")
+		kVal[1] = strings.Trim(kVal[1], "\"")
+		if kVal[0] == "id" {
+			u.Id = kVal[1]
+		} else if kVal[0] == "email" {
+			u.Email = kVal[1]
+		} else if kVal[0] == "age" {
+			age, err := strconv.Atoi(kVal[1])
+			if err != nil {
+				fmt.Println("error converting age")
+			}
+			u.Age = age
+		}
+	}
+	return u
 }
 
 func stringSplitter(s string) []string {
@@ -71,13 +75,13 @@ func parseArgs() Arguments {
 	op := flag.String("operation", "", "operation to perform on users list")
 	item := flag.String("item", "", "item to add")
 	Id := flag.String("id", "", "user id")
-	fileName := flag.String("fileName", "test.json", "name of the file with users list")
+	fileName := flag.String("fileName", "", "name of the file with users list")
 	flag.Parse()
 
 	var args Arguments
 
-	args.Operation = *op
-	args.Id = *Id
+	args.operation = *op
+	args.id = *Id
 	if len(*item) != 0 {
 		s := strings.Trim(*item, "{}")
 		item := strings.Split(s, ",")
@@ -87,14 +91,12 @@ func parseArgs() Arguments {
 		if err != nil {
 			fmt.Println("error converting age to int")
 		}
-		args.ItemUsr = User{id, email, age}
-		args.Item = fmt.Sprintf("[{\"id\" :\"%s\",\"email\" :\"%s\",\"age\" :%d}]", id, email, age)
+		args.item = fmt.Sprintf("[{\"id\" :\"%s\",\"email\" :\"%s\",\"age\" :%d}]", id, email, age)
+		//args.itemUsr = args.ItemParser()
+
 	}
 
-	if len(*fileName) == 0 {
-		fmt.Println("please enter the file name")
-	}
-	args.FileName = *fileName
+	args.fileName = *fileName
 
 	return args
 }
@@ -108,15 +110,17 @@ func Add(item User, fileName string, writer io.Writer) {
 	buf, _ := ioutil.ReadAll(f)
 	defer f.Close()
 
-	users := Users{}
+	var users []User
 	_ = json.Unmarshal(buf, &users)
-
-	for _, elem := range users.Users {
+	for _, elem := range users {
 		if elem.Id == item.Id {
-			writer.Write([]byte("Item with id 1 already exists"))
+			writer.Write([]byte(IdExists(elem.Id)))
 		}
 	}
-	users.Append(item)
+	if item.Age != 0 {
+		users = append(users, item)
+
+	}
 	updUsers, _ := json.Marshal(&users)
 	os.WriteFile(fileName, updUsers, 0644)
 }
@@ -128,54 +132,49 @@ func List(fileName string, writer io.Writer) {
 		panic(err)
 	}
 	defer f.Close()
-	users := Users{}
 	buf, _ := ioutil.ReadAll(f)
-	_ = json.Unmarshal(buf, &users)
-	if len(users.Users) != 0 {
-		users.Print(writer)
+	if len(buf) != 0 {
+		writer.Write(buf)
 	}
 }
 
-func Remove(id string, fileName string) {
-	f, err := os.ReadFile(fileName)
-	if os.IsNotExist(err) {
-		fmt.Println("no such file")
-	}
-	users := Users{}
-	newUsers := Users{}
+func Remove(id string, fileName string, writer io.Writer) {
+	f, _ := os.ReadFile(fileName)
+
+	var users, newUsers []User
 	_ = json.Unmarshal(f, &users)
-	for i := 0; i < len(users.Users); i++ {
-		if users.Users[i].Id != id {
-			newUsers.Append(users.Users[i])
+	for i := 0; i < len(users); i++ {
+		if users[i].Id != id {
+			newUsers = append(newUsers, users[i])
 		}
 	}
+
 	updUsers, _ := json.Marshal(&newUsers)
+
+	if len(newUsers) == len(users) {
+		writer.Write([]byte(IdNotFound(id)))
+	}
 	os.WriteFile(fileName, updUsers, 0644)
 }
 
 func FindById(id string, fileName string, writer io.Writer) {
-	f, err := os.ReadFile(fileName)
-	if os.IsNotExist(err) {
-		fmt.Println("no such file")
-	}
-	users := Users{}
+	f, _ := os.ReadFile(fileName)
+	var users []User
 	_ = json.Unmarshal(f, &users)
-	fmt.Println(users)
-	for _, elem := range users.Users {
+	for _, elem := range users {
 		if elem.Id == id {
-			res := fmt.Sprintf("%v\n", elem)
+			res := fmt.Sprintf("{\"id\":\"%s\",\"email\":\"%s\",\"age\":%d}", elem.Id, elem.Email, elem.Age)
 			writer.Write([]byte(res))
+			return
 		}
 	}
-
+	writer.Write([]byte(""))
 }
 
 func Perform(args Arguments, writer io.Writer) (err error) {
 
-	op := args.Operation
-	fileName := args.FileName
-
-	fmt.Println(args)
+	op := args.operation
+	fileName := args.fileName
 
 	if op == "" {
 		err = fmt.Errorf("%w", OperationMissing)
@@ -188,9 +187,10 @@ func Perform(args Arguments, writer io.Writer) (err error) {
 
 	switch op {
 	case "add":
-		item := args.ItemUsr
-		//fileName := args.FileName
-		fmt.Println(args.Item)
+		if len(args.item) != 0 {
+			args.itemUsr = args.ItemParser()
+		}
+		item := args.itemUsr
 		Add(item, fileName, writer)
 		if item.Age == 0 { // think about nil User
 			err = fmt.Errorf("%w", ItemMissing)
@@ -198,20 +198,20 @@ func Perform(args Arguments, writer io.Writer) (err error) {
 		return err
 
 	case "list":
-		//fileName := args.FileName
 		List(fileName, writer)
 
 	case "remove":
-		//fileName := args.FileName
-		id := args.Id
+		id := args.id
 		if id == "" {
 			err = fmt.Errorf("%w", IdMissing)
 		}
-		Remove(id, fileName)
+		Remove(id, fileName, writer)
 
 	case "findById":
-		//fileName := args.FileName
-		id := args.Id
+		id := args.id
+		if id == "" {
+			err = fmt.Errorf("%w", IdMissing)
+		}
 		FindById(id, fileName, writer)
 
 	default:
